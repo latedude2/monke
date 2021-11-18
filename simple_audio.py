@@ -15,6 +15,7 @@ from scipy import signal
 import numpy as np
 import argparse 
 import pyaudio
+import librosa
 import wave
 import time
 
@@ -49,7 +50,7 @@ def getInputDevice(p):
 def get_live_input():
     CHUNK = 4096
     FORMAT = pyaudio.paInt32
-    CHANNELS = 2
+    CHANNELS = 1
     RATE = 16000 
     RECORD_SECONDS = 3
     WAVE_OUTPUT_FILENAME = "test.wav"
@@ -80,16 +81,15 @@ def get_live_input():
                 data = stream.read(CHUNK, exception_on_overflow = False)
                 frames.append(data)
 
-            # process data
-            # 4096 * 3 frames * 2 channels * 4 bytes = 98304 bytes 
-            # CHUNK * NFRAMES * 2 * 4 
-            buffer = b''.join(frames)
-            audio_data = np.frombuffer(buffer, dtype=np.int32)
-            nbytes = CHUNK * NFRAMES 
-            # reshape for input 
-            audio_data = audio_data.reshape((nbytes, 2))
+            wf = wave.open('recording.wav', 'wb')
+            wf.setnchannels(CHANNELS)
+            wf.setsampwidth(p.get_sample_size(FORMAT))
+            wf.setframerate(RATE)
+            wf.writeframes(b''.join(frames))
+            wf.close()
+
             # run inference on audio data 
-            run_inference(audio_data)
+            run_inference('recording.wav')
     except KeyboardInterrupt:
         print("exiting...")
            
@@ -179,18 +179,26 @@ def get_spectrogram(waveform):
         
     return spectrogram
 
+def get_features(filename):
+    X, sample_rate = librosa.load(filename, res_type='kaiser_fast',duration=2.5,sr=22050*2,offset=0.5)
+    sample_rate = np.array(sample_rate)
+    mfccs = np.mean(librosa.feature.mfcc(y=X, sr=sample_rate, n_mfcc=13), axis=0)
+    feature = mfccs
+    
+    return feature
 
-def run_inference(waveform):
+
+def run_inference(audiofile):
 
     # get spectrogram data 
-    spectrogram = get_spectrogram(waveform)
+    spectrogram = get_features(audiofile)
 
     if not len(spectrogram):
         print("Too silent. Skipping...")
         #time.sleep(1)
         return 
 
-    spectrogram1= np.reshape(spectrogram, (-1, spectrogram.shape[0], spectrogram.shape[1], 1))
+    spectrogram1= np.reshape(spectrogram, (-1, spectrogram.shape[0], 1))
     
     if VERBOSE_DEBUG:
         print("spectrogram1: %s, %s, %s" % (type(spectrogram1), spectrogram1.dtype, spectrogram1.shape))
